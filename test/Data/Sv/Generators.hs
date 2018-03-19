@@ -17,6 +17,7 @@ module Data.Sv.Generators (
 
 import Control.Applicative ((<$>), liftA2, liftA3)
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.UTF8 as UTF8
 import qualified Data.ByteString.Lazy as LBS
 import Data.ByteString.Builder (Builder)
 import qualified Data.ByteString.Builder as Builder
@@ -99,6 +100,8 @@ genCsvString =
   let intercalate' :: (Semigroup m, Monoid m) => m -> NonEmpty m -> m
       intercalate' _ (x:|[]) = x
       intercalate' m (x:|y:zs) = x <> m <> intercalate' m (y:|zs)
+      genBomMaybe :: Gen Builder
+      genBomMaybe = fmap (foldMap (Builder.byteString . UTF8.fromString . pure)) (Gen.maybe (pure '\xFEFF'))
       genNewlineString :: Gen Builder
       genNewlineString = Gen.element (fmap Builder.string7 ["\n", "\r", "\r\n"])
       genCsvRowString = intercalate' "," <$> Gen.nonEmpty (Range.linear 1 100) genCsvField
@@ -112,4 +115,4 @@ genCsvString =
         , enquote "'" genCsvFieldString
         , genCsvFieldString
         ]
-  in  fmap (LBS.toStrict . Builder.toLazyByteString) $ intercalate' <$> genNewlineString <*> Gen.nonEmpty (Range.linear 0 100) genCsvRowString
+  in  fmap (LBS.toStrict . Builder.toLazyByteString) $ liftA2 (<>) genBomMaybe $ intercalate' <$> genNewlineString <*> Gen.nonEmpty (Range.linear 0 100) genCsvRowString

@@ -17,8 +17,8 @@ A sum type for space characters
 -}
 
 module Text.Space
-  ( HorizontalSpace (Space, Tab)
-  , AsHorizontalSpace (_HorizontalSpace, _Space, _Tab)
+  ( HorizontalSpace (Space, Tab, Bom)
+  , AsHorizontalSpace (_HorizontalSpace, _Space, _Tab, _Bom)
   , Spaces
   , single
   , manySpaces
@@ -49,6 +49,7 @@ import GHC.Generics (Generic)
 data HorizontalSpace =
   Space
   | Tab
+  | Bom
   deriving (Eq, Ord, Show)
 
 instance NFData HorizontalSpace where
@@ -59,8 +60,10 @@ class AsHorizontalSpace r where
   _HorizontalSpace :: Prism' r HorizontalSpace
   _Space :: Prism' r ()
   _Tab :: Prism' r ()
+  _Bom :: Prism' r ()
   _Space = _HorizontalSpace . _Space
   _Tab = _HorizontalSpace . _Tab
+  _Bom = _HorizontalSpace . _Bom
 
 instance AsHorizontalSpace HorizontalSpace where
   _HorizontalSpace = id
@@ -73,6 +76,11 @@ instance AsHorizontalSpace HorizontalSpace where
     prism (const Tab) $ \x ->
       case x of
         Tab -> Right ()
+        _   -> Left x
+  _Bom =
+    prism (const Bom) $ \x ->
+      case x of
+        Bom -> Right ()
         _   -> Left x
 
 instance AsHorizontalSpace Char where
@@ -97,12 +105,14 @@ tab = V.singleton Tab
 spaceToChar :: HorizontalSpace -> Char
 spaceToChar Space = ' '
 spaceToChar Tab = '\t'
+spaceToChar Bom = '\xFEFF'
 
 -- | Try to turn a 'Char' into a Space. To go the other way, see 'spaceToChar'
 charToSpace :: Char -> Maybe HorizontalSpace
 charToSpace c = case c of
   ' '  -> Just Space
   '\t' -> Just Tab
+  '\xFEFF' -> Just Bom
   _    -> Nothing
 
 -- | Parse 'Text' into 'Spaces', or turn spaces into 'Data.Text.Text'

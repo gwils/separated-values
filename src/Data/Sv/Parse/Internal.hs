@@ -44,7 +44,7 @@ import Data.Sv.Parse.Options (ParseOptions, separator, endOnBlankLine, encodeStr
 import Data.Vector.NonEmpty as V
 import Text.Escape (Unescaped (Unescaped))
 import Text.Newline (Newline (CR, CRLF, LF))
-import Text.Space (HorizontalSpace (Space, Tab), Spaces, Spaced, betwixt)
+import Text.Space (HorizontalSpace (Space, Tab, Bom), Spaces, Spaced, betwixt)
 import Text.Quote (Quote (SingleQuote, DoubleQuote), quoteChar)
 
 -- | This function is in newer versions of the parsers package, but in
@@ -118,7 +118,7 @@ newline =
 space :: CharParsing m => Separator -> m HorizontalSpace
 space sep =
   let removeIfSep c s = if sep == c then empty else char c $> s
-  in  removeIfSep ' ' Space <|> removeIfSep '\t' Tab
+  in  removeIfSep ' ' Space <|> removeIfSep '\t' Tab <|> removeIfSep '\xFEFF' Bom
 
 spaces :: CharParsing m => Separator -> m Spaces
 spaces = fmap V.fromList . many . space
