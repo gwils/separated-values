@@ -63,8 +63,9 @@ module Data.Sv.Encode (
   Encode (..)
 
 -- * Convenience constructors
-, mkEncodeBS
+, mkEncode
 , mkEncodeWithOpts
+, mkEncodeBS
 , unsafeBuilder
 
 -- * Running an Encode
@@ -138,7 +139,6 @@ import Data.List.NonEmpty (NonEmpty, nonEmpty)
 import Data.Monoid (Monoid (mempty), First, (<>), mconcat)
 import Data.Sequence (Seq, ViewL (EmptyL, (:<)), viewl, (<|))
 import qualified Data.Sequence as Seq
-import qualified Data.Sequence as S (singleton, empty)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import System.IO (BufferMode (BlockBuffering), Handle, hClose, hSetBinaryMode, hSetBuffering, openFile, IOMode (WriteMode))
@@ -154,13 +154,38 @@ import Text.Newline (newlineToString)
 import Text.Space (Spaced (Spaced), spacesString)
 import Text.Quote (quoteChar)
 
--- | Make an 'Encode' from a function that builds one 'Field'.
+-- | Make an 'Encode' from a function that builds one field as a 'Data.ByteString.Builder.Builder'.
+--
+-- This encoder will add quotes and spaces automatically depending on the
+-- given config when the decoder is run.
+--
+-- Note that if you call this, you are responsible for doing any quote
+-- escaping yourself. You might prefer 'escaped'.
+mkEncode :: (a -> BS.Builder) -> Encode a
+mkEncode f = mkEncodeWithOpts (P.const f)
+
+-- | Make an 'Encode' from a function that builds one field as a 'Data.ByteString.Lazy.ByteString'.
+--
+-- This encoder will add quotes and spaces automatically depending on the
+-- given config when the decoder is run.
+--
+-- Note that if you call this, you are responsible for doing any quote
+-- escaping yourself. You might prefer 'escaped'.
 mkEncodeBS :: (a -> LBS.ByteString) -> Encode a
-mkEncodeBS = unsafeBuilder . fmap BS.lazyByteString
+mkEncodeBS = mkEncode . fmap BS.lazyByteString
 
 -- | Make an 'Encode' from a function that builds one 'Field'.
 mkEncodeWithOpts :: (EncodeOptions -> a -> BS.Builder) -> Encode a
-mkEncodeWithOpts = Encode . fmap (fmap pure)
+mkEncodeWithOpts f = Encode $ \opts a ->
+  let
+    quotep = foldMap (BS.charUtf8 . review quoteChar) (view quote opts)
+    addQuotes x = quotep <> x <> quotep
+    mkSpaces optic = BS.stringUtf8 . review spacesString . view optic $ opts
+    bspaces = mkSpaces spacingBefore
+    aspaces = mkSpaces spacingAfter
+    addSpaces x = bspaces <> x <> aspaces
+  in
+    Seq.singleton . addSpaces . addQuotes $ f opts a
 
 -- | Make an encode from any function that returns a ByteString 'Builder'.
 unsafeBuilder :: (a -> BS.Builder) -> Encode a
@@ -206,13 +231,7 @@ encodeRow e opts = BS.toLazyByteString . encodeRowBuilder e opts
 encodeRowBuilder :: Encode a -> EncodeOptions -> a -> BS.Builder
 encodeRowBuilder e opts =
   let addSeparators = intersperseSeq (BS.charUtf8 (view separator opts))
-      quotep = foldMap (BS.charUtf8 . review quoteChar) (view quote opts)
-      addQuotes x = quotep <> x <> quotep
-      mkSpaces optic = BS.stringUtf8 . review spacesString . view optic $ opts
-      bspaces = mkSpaces spacingBefore
-      aspaces = mkSpaces spacingAfter
-      addSpaces x = bspaces <> x <> aspaces
-  in  fold . addSeparators . fmap (addSpaces . addQuotes) . getEncode e opts
+  in  fold . addSeparators . getEncode e opts
 
 -- | Build an 'Sv' rather than going straight to 'ByteString'. This allows you
 -- to query the Sv or run sanity checks.
@@ -253,7 +272,7 @@ nop = conquer
 
 -- | Encode anything as the empty string.
 empty :: Encode a
-empty = Encode (pure (pure (pure mempty)))
+empty = mkEncode mempty
 
 -- | Lift an Encode to be able to hanlde 'Maybe', by using the empty string
 -- in the case of 'Nothing'
@@ -293,19 +312,19 @@ char = escaped escapeChar BS.charUtf8 BS.stringUtf8
 
 -- | Encode an 'Int'
 int :: Encode Int
-int = unsafeBuilder BS.intDec
+int = mkEncode BS.intDec
 
 -- | Encode an 'Integer'
 integer :: Encode Integer
-integer = unsafeBuilder BS.integerDec
+integer = mkEncode BS.integerDec
 
 -- | Encode a 'Float'
 float :: Encode Float
-float = unsafeBuilder BS.floatDec
+float = mkEncode BS.floatDec
 
 -- | Encode a 'Double'
 double :: Encode Double
-double = unsafeBuilder BS.doubleDec
+double = mkEncode BS.doubleDec
 
 -- | Encode a 'String'
 string :: Encode String
@@ -431,5 +450,5 @@ unsafeConst b = contramap (pure b) unsafeByteString
 -- Added in containers 0.5.8, but we duplicate it here to support older GHCs
 intersperseSeq :: a -> Seq a -> Seq a
 intersperseSeq y xs = case viewl xs of
-  EmptyL -> S.empty
-  p :< ps -> p <| (ps <**> (pure y <| S.singleton id))
+  EmptyL -> Seq.empty
+  p :< ps -> p <| (ps <**> (pure y <| Seq.singleton id))
