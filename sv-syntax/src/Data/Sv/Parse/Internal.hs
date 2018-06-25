@@ -11,7 +11,7 @@ As the Internal name suggests, this file is exempt from the PVP. Depend
 on this module at your own risk!
 -}
 
-module Data.Sv.Parse.Internal (
+module Data.Sv.Parse.Internal {-(
   separatedValues
   , header
   , field
@@ -23,7 +23,7 @@ module Data.Sv.Parse.Internal (
   , record
   , records
   , ending
-) where
+)-} where
 
 import Control.Applicative (Alternative ((<|>), empty), optional)
 import Control.Lens (review, view)
@@ -38,7 +38,7 @@ import Text.Parser.Char (CharParsing, char, notChar, noneOfSet, oneOfSet, string
 import Text.Parser.Combinators (between, choice, eof, many, notFollowedBy, sepEndBy, try)
 
 import Data.Sv.Syntax.Sv (Sv (Sv), Header, mkHeader, noHeader, Headedness (Unheaded, Headed), headedness, Separator)
-import Data.Sv.Syntax.Field (Field (Unquoted, Quoted))
+import Data.Sv.Syntax.Field (Field (Unquoted, Quoted), SpacedField)
 import Data.Sv.Syntax.Record (Record (Record), Records (Records, EmptyRecords))
 import Data.Sv.Parse.Options (ParseOptions, separator, endOnBlankLine, encodeString)
 import Data.Sv.Vector.NonEmpty as V
@@ -46,6 +46,49 @@ import Data.Sv.Text.Escape (Unescaped (Unescaped))
 import Data.Sv.Text.Newline (Newline (CR, CRLF, LF))
 import Data.Sv.Text.Space (HorizontalSpace (Space, Tab), Spaces, Spaced, betwixt)
 import Data.Sv.Text.Quote (Quote (SingleQuote, DoubleQuote), quoteChar)
+
+data Parsers m s =
+  Parsers {
+    prSeparatedValues :: m (Sv s)
+  , prHeader :: m (Maybe (Header s))
+  , prRecords :: m (Records s)
+  , prFirstRecord :: m (Record s)
+  , prSubsequentRecord :: m (Newline, Record s)
+  , prRecord :: m (Record s)
+  , prEnding :: m [Newline]
+  , prSpacedField :: m (SpacedField s)
+  , prField :: m (Field s)
+  , prSpaced :: m (Field s) -> m (SpacedField s)
+  , prSingleQuotedField :: m (Field s)
+  , prDoubleQuotedField :: m (Field s)
+  , prUnquotedField :: m (Field s)
+  }
+
+parsers :: (CharParsing m, Alternative m) => ParseOptions s -> Parsers m s
+parsers opts =
+  let
+    sep = view separator opts
+    enc = view encodeString opts
+    hed = view headedness opts
+    eobl = view endOnBlankLine opts
+    mkParsers =
+      Parsers
+        <$> separatedValues' sep
+        <*> header' hed
+        <*> records'
+        <*> firstRecord'
+        <*> subsequentRecord'
+        <*> record' sep
+        <*> pure (ending' eobl)
+        <*> spacedField'
+        <*> field'
+        <*> pure (spaced sep)
+        <*> pure (singleQuotedField enc)
+        <*> pure (doubleQuotedField enc)
+        <*> pure (unquotedField sep enc)
+    p = mkParsers p
+  in 
+    p
 
 -- | This function is in newer versions of the parsers package, but in
 -- order to maintain compatibility with older versions I've left it here.
@@ -99,9 +142,21 @@ field sep str =
   , unquotedField sep str
   ]
 
+-- | Parse a field, be it quoted or unquoted
+field' :: CharParsing m => Parsers m s -> m (Field s)
+field' p =
+  choice [
+    prSingleQuotedField p
+  , prDoubleQuotedField p
+  , prUnquotedField p
+  ]
+
 -- | Parse a field with its surrounding spacing
 spacedField :: CharParsing m => Separator -> (String -> s) -> m (Spaced (Field s))
 spacedField sep str = spaced sep (field sep str)
+
+spacedField' :: CharParsing m => Parsers m s -> m (Spaced (Field s))
+spacedField' p = prSpaced p (prField p)
 
 newlineOr :: Char -> CharSet
 newlineOr c = CharSet.insert c newlines
@@ -134,15 +189,25 @@ record opts =
       str = view encodeString opts
   in  Record . V.fromNel <$> (spacedField sep str `sepEndByNonEmpty` char sep)
 
+record' :: CharParsing m => Separator -> Parsers m s -> m (Record s)
+record' sep p =
+  Record . V.fromNel <$> (prSpacedField p `sepEndByNonEmpty` char sep)
+
 -- | Parse many records, or "rows"
 records :: CharParsing m => ParseOptions s -> m (Records s)
-records opts =
+records = prRecords . parsers
+
+records' :: CharParsing m => Parsers m s -> m (Records s)
+records' p =
   let manyV = fmap V.fromList . many
   in  fromMaybe EmptyRecords <$>
-    optional (Records <$> firstRecord opts <*> manyV (subsequentRecord opts))
+    optional (Records <$> prFirstRecord p <*> manyV (prSubsequentRecord p))
 
 firstRecord :: CharParsing m => ParseOptions s -> m (Record s)
 firstRecord opts = notFollowedBy (try (ending opts)) *> record opts
+
+firstRecord' :: CharParsing m => Parsers m s -> m (Record s)
+firstRecord' p = notFollowedBy (try (prEnding p)) *> prRecord p
 
 subsequentRecord :: CharParsing m => ParseOptions s -> m (Newline, Record s)
 subsequentRecord opts =
@@ -150,10 +215,23 @@ subsequentRecord opts =
     <$> (notFollowedBy (try (ending opts)) *> newline) -- ((if view endOnBlankLine opts then (void newline) else empty) <|> eof))
     <*> record opts
 
+subsequentRecord' :: CharParsing m => Parsers m s -> m (Newline, Record s)
+subsequentRecord' p =
+  (,)
+    <$> (notFollowedBy (try (prEnding p)) *> newline) -- ((if view endOnBlankLine opts then (void newline) else empty) <|> eof))
+    <*> prRecord p
+
 -- | Parse zero or many newlines
 ending :: CharParsing m => ParseOptions s -> m [Newline]
 ending opts =
   let end = if view endOnBlankLine opts then pure [] else many newline
+  in  [] <$ eof
+    <|> try (pure <$> newline <* eof)
+    <|> (:) <$> newline <*> ((:) <$> newline <*> end)
+
+ending' :: CharParsing m => Bool -> m [Newline]
+ending' eobl =
+  let end = if eobl then pure [] else many newline
   in  [] <$ eof
     <|> try (pure <$> newline <* eof)
     <|> (:) <$> newline <*> ((:) <$> newline <*> end)
@@ -164,7 +242,15 @@ header opts = case view headedness opts of
   Unheaded -> pure noHeader
   Headed -> mkHeader <$> record opts <*> newline
 
+header' :: CharParsing m => Headedness -> Parsers m s -> m (Maybe (Header s))
+header' opts p = case view headedness opts of
+  Unheaded -> pure noHeader
+  Headed -> mkHeader <$> prRecord p <*> newline
+
 -- | Parse an 'Sv'
 separatedValues :: CharParsing m => ParseOptions s -> m (Sv s)
-separatedValues opts =
-  Sv (view separator opts) <$> header opts <*> records opts <*> ending opts
+separatedValues = prSeparatedValues . parsers
+
+separatedValues' :: CharParsing m => Separator -> Parsers m s -> m (Sv s)
+separatedValues' sep p =
+  Sv sep <$> prHeader p <*> prRecords p <*> prEnding p

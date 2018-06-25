@@ -19,10 +19,11 @@ import Test.Tasty.Hedgehog (testProperty)
 import Test.Tasty.HUnit ((@?=), testCase)
 import Text.Parser.Char (CharParsing)
 import Text.Trifecta (parseByteString)
+import qualified Text.Trifecta as Trifecta
 
 import Data.Sv.Parse (trifectaResultToEither)
 import Data.Sv.Generators
-import Data.Sv.Syntax (Sv, Headedness, SpacedField, comma)
+import Data.Sv.Syntax (Sv, Headedness (..), SpacedField, comma)
 import Data.Sv.Parse (defaultParseOptions, headedness, encodeString, separatedValues)
 import Data.Sv.Parse.Internal (spacedField)
 import Data.Sv.Print (defaultPrintOptions, printSvText)
@@ -75,9 +76,19 @@ prop_csvRoundTrip =
       genText  = Gen.text (Range.linear 1 100) Gen.alphaNum
       gen = genSvWithHeadedness (pure comma) genSpaces genText
       mkOpts h = defaultParseOptions & headedness .~ h & encodeString .~ Text.pack
+      {-# INLINE mkOpts #-}
       parseCsv :: CharParsing m => Headedness -> m (Sv Text)
       parseCsv = separatedValues . mkOpts
-      parse h = parseByteString (parseCsv h) mempty
+      {-# INLINE parseCsv #-}
+      parseH :: Trifecta.Parser (Sv Text)
+      !parseH = parseCsv Headed
+      parseNoH :: Trifecta.Parser (Sv Text)
+      !parseNoH = parseCsv Unheaded
+      chooseParser h = case h of
+        Headed -> parseH
+        Unheaded -> parseNoH
+      {-# INLINE chooseParser #-}
+      parse h = parseByteString (chooseParser h) mempty
   in  property $ do
     (c,h) <- forAll gen
     trifectaResultToEither (fmap printSvText (parse h (printSvText c))) === pure (printSvText c)
