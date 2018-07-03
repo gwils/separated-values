@@ -20,7 +20,7 @@ file = "csv/numbers.csv"
 opts :: ParseOptions
 opts = defaultParseOptions & headedness .~ Unheaded
 
-num :: Decode' ByteString (Maybe Double)
+num :: Decode ByteString (Maybe Double)
 num = D.orEmpty D.double
   <!> (D.exactly "unknown" <!> D.exactly "NULL") $> Nothing
 

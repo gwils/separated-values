@@ -19,7 +19,7 @@ data Person =
   | TwoNames Name Name Age
   deriving (Eq,Ord,Show)
 
-personDecoder :: Decode ByteString ByteString Person
+personDecoder :: Decode ByteString Person
 personDecoder =
   OneName <$> D.utf8 <*> D.int
   <!>

@@ -13,7 +13,6 @@ Portability : non-portable
 
 module Data.Sv.Decode.Type (
   Decode (..)
-, Decode'
 , buildDecode
 , DecodeState (..)
 , runDecodeState
@@ -53,15 +52,11 @@ import GHC.Generics (Generic)
 --
 -- 'Decode' is not a 'Monad', but we can perform monad-like operations on
 -- it with 'Data.Sv.Decode.>>==' 'Data.Sv.Decode.bindDecode'
-newtype Decode e s a =
-  Decode { unwrapDecode :: Compose (DecodeState s) (DecodeValidation e) a }
+newtype Decode s a =
+  Decode { unwrapDecode :: Compose (DecodeState s) (DecodeValidation s) a }
   deriving (Functor, Apply, Applicative)
 
--- | 'Decode'' is 'Decode' with the input and error types the same. You usually
--- want them to be the same, and most primitives are set up this way.
-type Decode' s = Decode s s
-
-instance Alt (Decode e s) where
+instance Alt (Decode s) where
   Decode (Compose as) <!> Decode (Compose bs) =
     buildDecode $ \v i ->
       case runDecodeState as v i of
@@ -72,10 +67,6 @@ instance Alt (Decode e s) where
             in  case a' <!> b' of
                   Failure e -> (Failure e, k)
                   Success (z, m) -> (Success z, m)
-
-instance Profunctor (Decode e) where
-  lmap f (Decode (Compose dec)) = Decode (Compose (lmap f dec))
-  rmap = fmap
 
 -- | As we decode a row of data, we walk through its fields. This 'Monad'
 -- keeps track of our position.
@@ -91,7 +82,7 @@ instance Profunctor DecodeState where
   rmap = fmap
 
 -- | Convenient constructor for 'Decode' that handles all the newtype noise for you.
-buildDecode :: (Vector s -> Ind -> (DecodeValidation e a, Ind)) -> Decode e s a
+buildDecode :: (Vector s -> Ind -> (DecodeValidation s a, Ind)) -> Decode s a
 buildDecode f = Decode . Compose . DecodeState . ReaderT $ \v -> state $ \i -> f v i
 
 -- | Convenient function to run a DecodeState
@@ -141,4 +132,4 @@ instance NFData e => NFData (DecodeErrors e)
 
 -- | 'DecodeValidation' is the error-accumulating 'Applicative' underlying
 -- 'Decode'
-type DecodeValidation e = Validation (DecodeErrors e)
+type DecodeValidation s = Validation (DecodeErrors s)

@@ -31,6 +31,7 @@ import qualified Hedgehog.Range as Range
 import qualified Hedgehog.Internal.Seed as Seed
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 
+import Data.Sv (Decode)
 import Data.Sv.Alien.Hedgehog (sample)
 import qualified Data.Sv.Decode as D
 import qualified Data.Sv.Encode as E
@@ -168,19 +169,19 @@ longRowEnc = mconcat [
   , E.encodeOf lrC coproductEnc
   ]
 
-rowDec :: D.Decode' ByteString Row
+rowDec :: Decode ByteString Row
 rowDec =  Long <$> longRowDec <!> Short <$> shortRowDec
 
-shortRowDec :: D.Decode' ByteString ShortRow
+shortRowDec :: Decode ByteString ShortRow
 shortRowDec = ShortRow <$> D.byteString <*> D.byteString <*> D.byteString
 
-productDec :: D.Decode' ByteString Product
+productDec :: Decode ByteString Product
 productDec = Product <$> D.int <*> D.float <*> D.double
 
-coproductDec :: D.Decode' ByteString Coproduct
+coproductDec :: Decode ByteString Coproduct
 coproductDec = I <$> D.int <!> B <$> D.byteString <!> D <$> D.double
 
-longRowDec :: D.Decode' ByteString LongRow
+longRowDec :: Decode ByteString LongRow
 longRowDec = LongRow <$> D.byteString <*> D.byteString <*> D.int <*> D.integer <*> D.float <*> D.double <*> productDec <*> coproductDec
 
 rows :: Int -> Gen [Row]

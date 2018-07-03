@@ -1,3 +1,5 @@
+--TODO doc this whole file
+
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
@@ -35,7 +37,6 @@ import qualified Data.Sv.Decode as D
 module Data.Sv.Decode (
   -- * The types
   Decode (..)
-, Decode'
 , Validation (..)
 , DecodeValidation
 , DecodeError (..)
@@ -132,7 +133,7 @@ import qualified Prelude
 import Control.Lens (alaf, view)
 import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Reader (ReaderT (ReaderT))
+import Control.Monad.Reader (ReaderT (ReaderT), withReaderT)
 import Control.Monad.State (state)
 import qualified Data.Attoparsec.ByteString.Lazy as AL
 import qualified Data.Attoparsec.ByteString as A
@@ -145,7 +146,6 @@ import Data.Functor.Alt (Alt ((<!>)))
 import Data.Functor.Compose (Compose (Compose, getCompose))
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Monoid (First (First))
-import Data.Profunctor (lmap)
 import Data.Readable (Readable (fromBS))
 import Data.Semigroup (Semigroup ((<>)), sconcat)
 import Data.Semigroup.Foldable (asum1)
@@ -168,12 +168,12 @@ import Data.Sv.Decode.Error
 import Data.Sv.Decode.Type
 
 -- | Decodes a sv into a list of its values using the provided 'Decode'
-decode :: Decode' ByteString a -> DsvCursor -> DecodeValidation ByteString [a]
+decode :: Decode ByteString a -> DsvCursor -> DecodeValidation ByteString [a]
 decode d = traverse (promoteLazy d) . DSV.toListVector
 
 -- | Parse a 'ByteString' as an Sv, and then decode it with the given decoder.
 parseDecode ::
-  Decode' ByteString a
+  Decode ByteString a
   -> ParseOptions
   -> LBS.ByteString
   -> DecodeValidation ByteString [a]
@@ -187,7 +187,7 @@ parseDecode d opts bs =
 -- | Load a file, parse it, and decode it.
 parseDecodeFromFile ::
   MonadIO m
-  => Decode' ByteString a
+  => Decode ByteString a
   -> ParseOptions
   -> FilePath
   -> m (DecodeValidation ByteString [a])
@@ -197,31 +197,31 @@ parseDecodeFromFile d opts fp =
 -- | Build a 'Decode', given a function that returns 'Maybe'.
 --
 -- Return the given error if the function returns 'Nothing'.
-decodeMay :: DecodeError e -> (s -> Maybe a) -> Decode e s a
+decodeMay :: DecodeError s -> (s -> Maybe a) -> Decode s a
 decodeMay e f = mkDecode (validateMaybe e . f)
 
 -- | Build a 'Decode', given a function that returns 'Either'.
-decodeEither :: (s -> Either (DecodeError e) a) -> Decode e s a
+decodeEither :: (s -> Either (DecodeError s) a) -> Decode s a
 decodeEither f = mkDecode (validateEither . f)
 
 -- | Build a 'Decode', given a function that returns 'Either', and a function to
 -- build the error.
-decodeEither' :: (e -> DecodeError e') -> (s -> Either e a) -> Decode e' s a
+decodeEither' :: (s -> DecodeError s') -> (s' -> Either s a) -> Decode s' a
 decodeEither' e f = mkDecode (validateEither' e . f)
 
 -- | Get the contents of a field without doing any decoding. This never fails.
-contents :: Decode e s s
+contents :: Decode s s
 contents = mkDecode pure
 
 -- | Grab the whole row as a 'Vector'
-row :: Decode e s (Vector s)
+row :: Decode s (Vector s)
 row =
   Decode . Compose . DecodeState . ReaderT $ \v ->
     state (const (pure v, Ind (V.length v)))
 
 -- | Get a field that's a single char. This will fail if there are mulitple
 -- characters in the field.
-char :: Decode' ByteString Char
+char :: Decode ByteString Char
 char = string >>== \cs -> case cs of
   [] -> badDecode "Expected single char but got empty string"
   (c:[]) -> pure c
@@ -230,63 +230,63 @@ char = string >>== \cs -> case cs of
 -- | Get the contents of a field as a bytestring.
 --
 -- Alias for 'contents'
-byteString :: Decode' ByteString ByteString
+byteString :: Decode ByteString ByteString
 byteString = contents
 
 -- | Get the contents of a UTF-8 encoded field as 'Text'
 --
 -- This will also work for ASCII text, as ASCII is a subset of UTF-8
-utf8 :: Decode' ByteString Text
+utf8 :: Decode ByteString Text
 utf8 = contents >>==
   Prelude.either (badDecode . UTF8.fromString . show) pure . decodeUtf8'
 
 -- | Get the contents of a field as a lazy 'Data.Text.Lazy.Text'
-lazyUtf8 :: Decode' ByteString LT.Text
+lazyUtf8 :: Decode ByteString LT.Text
 lazyUtf8 = LT.fromStrict <$> utf8
 
 -- | Get the contents of a field as a lazy 'Data.ByteString.Lazy.ByteString'
-lazyByteString :: Decode' ByteString LBS.ByteString
+lazyByteString :: Decode ByteString LBS.ByteString
 lazyByteString = LBS.fromStrict <$> contents
 
 -- | Get the contents of a field as a 'String'
-string :: Decode' ByteString String
+string :: Decode ByteString String
 string = UTF8.toString <$> contents
 
 -- | Throw away the contents of a field. This is useful for skipping unneeded fields.
-ignore :: Decode e s ()
+ignore :: Decode s ()
 ignore = replace ()
 
 -- | Throw away the contents of a field, and return the given value.
-replace :: a -> Decode e s a
+replace :: a -> Decode s a
 replace a = a <$ contents
 
 -- | Decode exactly the given string, or else fail.
-exactly :: (Semigroup s, Eq s, IsString s) => s -> Decode' s s
+exactly :: (Semigroup s, Eq s, IsString s) => s -> Decode s s
 exactly s = contents >>== \z ->
   if s == z
   then pure s
   else badDecode (sconcat ("'":|[z,"' was not equal to '",s,"'"]))
 
 -- | Decode a UTF-8 'ByteString' field as an 'Int'
-int :: Decode' ByteString Int
+int :: Decode ByteString Int
 int = named "int"
 
 -- | Decode a UTF-8 'ByteString' field as an 'Integer'
-integer :: Decode' ByteString Integer
+integer :: Decode ByteString Integer
 integer = named "integer"
 
 -- | Decode a UTF-8 'ByteString' field as a 'Float'
-float :: Decode' ByteString Float
+float :: Decode ByteString Float
 float = named "float"
 
 -- | Decode a UTF-8 'ByteString' field as a 'Double'
-double :: Decode' ByteString Double
+double :: Decode ByteString Double
 double = named "double"
 
 -- | Decode a field as a 'Bool'
 --
 -- This aims to be tolerant to different forms a boolean might take.
-boolean :: (IsString s, Ord s) => Decode' s Bool
+boolean :: (IsString s, Ord s) => Decode s Bool
 boolean = boolean' fromString
 
 -- | Decode a field as a 'Bool'. This version lets you provide the fromString
@@ -295,7 +295,7 @@ boolean = boolean' fromString
 -- encodings such as UTF-16 or UTF-32.
 --
 -- This aims to be tolerant to different forms a boolean might take.
-boolean' :: Ord s => (String -> s) -> Decode' s Bool
+boolean' :: Ord s => (String -> s) -> Decode s Bool
 boolean' s =
   categorical' [
     (False, fmap s ["false", "False", "FALSE", "f", "F", "0", "n", "N", "no", "No", "NO", "off", "Off", "OFF"])
@@ -305,46 +305,46 @@ boolean' s =
 -- | Succeed only when the given field is the empty string.
 --
 -- The empty string surrounded in quotes or spaces is still the empty string.
-emptyField :: (Eq s, IsString s, Semigroup s) => Decode' s ()
+emptyField :: (Eq s, IsString s, Semigroup s) => Decode s ()
 emptyField = contents >>== \c ->
   unless (c == fromString "") (badDecode ("Expected emptiness but got: " <> c))
 
 -- | Choose the leftmost 'Decode' that succeeds. Alias for '<!>'
-choice :: Decode e s a -> Decode e s a -> Decode e s a
+choice :: Decode s a -> Decode s a -> Decode s a
 choice = (<!>)
 
 -- | Choose the leftmost 'Decode' that succeeds. Alias for 'asum1'
-element :: NonEmpty (Decode e s a) -> Decode e s a
+element :: NonEmpty (Decode s a) -> Decode s a
 element = asum1
 
 -- | Try the given 'Decode'. If it fails, instead succeed with 'Nothing'.
-ignoreFailure :: Decode e s a -> Decode e s (Maybe a)
+ignoreFailure :: Decode s a -> Decode s (Maybe a)
 ignoreFailure a = Just <$> a <!> Nothing <$ ignore
 
 -- | If the field is the empty string, succeed with 'Nothing'.
 -- Otherwise try the given 'Decode'.
-orEmpty :: (Eq s, IsString s, Semigroup s) => Decode' s a -> Decode' s (Maybe a)
+orEmpty :: (Eq s, IsString s, Semigroup s) => Decode s a -> Decode s (Maybe a)
 orEmpty a = Nothing <$ emptyField <!> Just <$> a
 
 -- | Try the given 'Decode'. If it fails, succeed without consuming anything.
 --
 -- This usually isn't what you want. 'ignoreFailure' and 'orEmpty' are more
 -- likely what you are after.
-optionalField :: Decode e s a -> Decode e s (Maybe a)
+optionalField :: Decode s a -> Decode s (Maybe a)
 optionalField a = Just <$> a <!> pure Nothing
 
 -- | Try the first, then try the second, and wrap the winner in an 'Either'.
 --
 -- This is left-biased, meaning if they both succeed, left wins.
-either :: Decode e s a -> Decode e s b -> Decode e s (Either a b)
+either :: Decode s a -> Decode s b -> Decode s (Either a b)
 either a b = fmap Left a <!> fmap Right b
 
 -- | Try the given decoder, otherwise succeed with the given value.
-orElse :: Decode e s a -> a -> Decode e s a
+orElse :: Decode s a -> a -> Decode s a
 orElse f a = f <!> replace a
 
 -- | Try the given decoder, or if it fails succeed with the given value, in an 'Either'.
-orElseE :: Decode e s b -> a -> Decode e s (Either a b)
+orElseE :: Decode s b -> a -> Decode s (Either a b)
 orElseE b a = fmap Right b <!> replace (Left a)
 
 -- | Decode categorical data, given a list of the values and the strings which match them.
@@ -353,7 +353,7 @@ orElseE b a = fmap Right b <!> replace (Left a)
 --
 -- > data TrafficLight = Red | Amber | Green
 -- > categorical [(Red, "red"), (Amber, "amber"), (Green, "green")]
-categorical :: (Ord s, Show a) => [(a, s)] -> Decode' s a
+categorical :: (Ord s, Show a) => [(a, s)] -> Decode s a
 categorical = categorical' . fmap (fmap pure)
 
 -- | Decode categorical data, given a list of the values and lists of strings
@@ -366,7 +366,7 @@ categorical = categorical' . fmap (fmap pure)
 -- > categorical' [(Red, ["red", "R"]), (Amber, ["amber", "orange", "A"]), (Green, ["green", "G"])]
 --
 -- For another example of its usage, see the source for 'boolean'.
-categorical' :: forall s a . (Ord s, Show a) => [(a, [s])] -> Decode' s a
+categorical' :: forall s a . (Ord s, Show a) => [(a, [s])] -> Decode s a
 categorical' as =
   let as' :: [(a, Set s)]
       as' = fmap (second fromList) as
@@ -380,22 +380,22 @@ categorical' as =
       alaf First foldMap (go s) as'
 
 -- | Use the 'Readable' instance to try to decode the given value.
-decodeRead :: Readable a => Decode' ByteString a
+decodeRead :: Readable a => Decode ByteString a
 decodeRead = decodeReadWithMsg (mappend "Couldn't parse ")
 
 -- | Use the 'Readable' instance to try to decode the given value,
 -- or fail with the given error message.
-decodeRead' :: Readable a => ByteString -> Decode' ByteString a
+decodeRead' :: Readable a => ByteString -> Decode ByteString a
 decodeRead' e = decodeReadWithMsg (const e)
 
 -- | Use the 'Readable' instance to try to decode the given value,
 -- or use the value to build an error message.
-decodeReadWithMsg :: Readable a => (ByteString -> e) -> Decode e ByteString a
+decodeReadWithMsg :: Readable a => (ByteString -> ByteString) -> Decode ByteString a
 decodeReadWithMsg e = contents >>== \c ->
   maybe (badDecode (e c)) pure . fromBS $ c
 
 -- | Given the name of a type, try to decode it using 'Readable', 
-named :: Readable a => ByteString -> Decode' ByteString a
+named :: Readable a => ByteString -> Decode ByteString a
 named name =
   let vs' = ['a','e','i','o','u']
       vs  = fmap toUpper vs' ++ vs'
@@ -409,35 +409,38 @@ named name =
 -- | Map over the errors of a 'Decode'
 --
 -- To map over the other two parameters, use the 'Data.Profunctor.Profunctor' instance.
-mapErrors :: (e -> x) -> Decode e s a -> Decode x s a
-mapErrors f (Decode (Compose r)) = Decode (Compose (fmap (first (fmap f)) r))
+mapErrors :: (s -> s) -> Decode s a -> Decode s a
+mapErrors f = alterInput f id
 
 -- | This transforms a @Decode' s a@ into a @Decode' t a@. It needs
 -- functions in both directions because the errors can include fragments of the
 -- input.
 --
 -- @alterInput :: (s -> t) -> (t -> s) -> Decode' s a -> Decode' t a@
-alterInput :: (e -> x) -> (t -> s) -> Decode e s a -> Decode x t a
-alterInput f g = mapErrors f . lmap g
+alterInput :: (s -> t) -> (t -> s) -> Decode s a -> Decode t a
+alterInput f g (Decode (Compose (DecodeState r))) =
+  Decode (Compose (DecodeState (
+    first (fmap f) <$> withReaderT (fmap g) r
+  )))
 
 ---- Promoting parsers to 'Decode's
 
 -- | Build a 'Decode' from a Trifecta parser
-withTrifecta :: Tri.Parser a -> Decode' ByteString a
+withTrifecta :: Tri.Parser a -> Decode ByteString a
 withTrifecta =
   mkParserFunction
     (validateTrifectaResult (BadDecode . UTF8.fromString))
     (flip Tri.parseByteString mempty)
 
 -- | Build a 'Decode' from an Attoparsec parser
-withAttoparsec :: A.Parser a -> Decode' ByteString a
+withAttoparsec :: A.Parser a -> Decode ByteString a
 withAttoparsec =
   mkParserFunction
     (validateEither' (BadDecode . fromString))
     A.parseOnly
 
 -- | Build a 'Decode' from a Parsec parser
-withParsec :: Parsec ByteString () a -> Decode' ByteString a
+withParsec :: Parsec ByteString () a -> Decode ByteString a
 withParsec =
   -- Parsec will include a position, but it will only confuse the user
   -- since it won't correspond obviously to a position in their source file.
@@ -451,14 +454,14 @@ mkParserFunction ::
   => (f a -> DecodeValidation ByteString a)
   -> (p a -> ByteString -> f a)
   -> p a
-  -> Decode' ByteString a
+  -> Decode ByteString a
 mkParserFunction err run p =
   let p' = p <* Tri.eof
   in  byteString >>== (err . run p')
 {-# INLINE mkParserFunction #-}
 
 -- | Convenience to get the underlying function out of a Decode in a useful form
-runDecode :: Decode e s a -> Vector s -> Ind -> (DecodeValidation e a, Ind)
+runDecode :: Decode s a -> Vector s -> Ind -> (DecodeValidation s a, Ind)
 runDecode = runDecodeState . getCompose . unwrapDecode
 {-# INLINE runDecode #-}
 
@@ -467,13 +470,13 @@ runDecode = runDecodeState . getCompose . unwrapDecode
 -- a 'Monad'.
 --
 -- If you need something like this but with more power, look at 'bindDecode'
-(>>==) :: Decode e s a -> (a -> DecodeValidation e b) -> Decode e s b
+(>>==) :: Decode s a -> (a -> DecodeValidation s b) -> Decode s b
 (>>==) = flip (==<<)
 infixl 1 >>==
 {-# INLINE (>>==) #-}
 
 -- | flipped '>>=='
-(==<<) :: (a -> DecodeValidation e b) -> Decode e s a -> Decode e s b
+(==<<) :: (a -> DecodeValidation s b) -> Decode s a -> Decode s b
 (==<<) f (Decode c) =
   Decode (rmapC (`bindValidation` (view _Validation . f)) c)
     where
@@ -488,7 +491,7 @@ infixr 1 ==<<
 --
 -- That is not to say that there is anything wrong with using this function.
 -- It can be quite useful.
-bindDecode :: Decode e s a -> (a -> Decode e s b) -> Decode e s b
+bindDecode :: Decode s a -> (a -> Decode s b) -> Decode s b
 bindDecode d f =
   buildDecode $ \v i ->
     case runDecode d v i of
@@ -496,7 +499,7 @@ bindDecode d f =
       (Success a, i') -> runDecode (f a) v i'
 
 -- | Run a 'Decode', and based on its errors build a new 'Decode'.
-onError :: Decode e s a -> (DecodeErrors e -> Decode e s a) -> Decode e s a
+onError :: Decode s a -> (DecodeErrors s -> Decode s a) -> Decode s a
 onError d f =
   buildDecode $ \v i ->
     case runDecode d v i of
@@ -507,7 +510,7 @@ onError d f =
 --
 -- This version gives you just the contents of the field, with no information
 -- about the spacing or quoting around that field.
-mkDecode :: (s -> DecodeValidation e a) -> Decode e s a
+mkDecode :: (s -> DecodeValidation s a) -> Decode s a
 mkDecode f =
   Decode . Compose . DecodeState . ReaderT $ \v -> state $ \(Ind i) ->
     if i >= length v
@@ -519,7 +522,7 @@ mkDecode f =
 --
 -- This version is polymorhpic in the flavour of string used
 -- (see 'promoteStrict' and 'promoteLazy')
-promote :: forall a bs. (forall x. A.Parser x -> bs -> Either ByteString x) -> Decode' ByteString a -> Vector bs -> DecodeValidation ByteString a
+promote :: forall a bs. (forall x. A.Parser x -> bs -> Either ByteString x) -> Decode ByteString a -> Vector bs -> DecodeValidation ByteString a
 promote parse dec vecLazy =
   let len = length vecLazy
       toField :: bs -> DecodeValidation ByteString ByteString
@@ -535,10 +538,10 @@ promote parse dec vecLazy =
 
 -- | Promotes a 'Decode' to work on a whole 'Record' of strict ByteStrings at once.
 -- This does not need to be called by the user. Instead use 'decode'.
-promoteStrict :: Decode' ByteString a -> Vector ByteString -> DecodeValidation ByteString a
+promoteStrict :: Decode ByteString a -> Vector ByteString -> DecodeValidation ByteString a
 promoteStrict = promote (\p b -> first UTF8.fromString $ A.parseOnly p b)
 
 -- | Promotes a 'Decode' to work on a whole 'Record' of lazy ByteStrings at once.
 -- This does not need to be called by the user. Instead use 'decode'.
-promoteLazy :: Decode' ByteString a -> Vector LBS.ByteString -> DecodeValidation ByteString a
+promoteLazy :: Decode ByteString a -> Vector LBS.ByteString -> DecodeValidation ByteString a
 promoteLazy = promote (\p b -> first UTF8.fromString $ AL.eitherResult $ AL.parse p b)

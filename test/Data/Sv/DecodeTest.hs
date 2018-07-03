@@ -10,12 +10,11 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Functor.Alt ((<!>))
 import Data.List.NonEmpty (NonEmpty ((:|)))
-import Data.Semigroup (Semigroup)
 import qualified Data.Vector as V
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
---import Data.Sv
+import Data.Sv
 import qualified Data.Sv.Decode as D
 import Data.Sv.Cursor.Separator (comma)
 
@@ -30,17 +29,17 @@ data IntOrString =
   I Int | S String
   deriving (Eq, Ord, Show)
 
-intOrString :: D.Decode' ByteString IntOrString
+intOrString :: Decode ByteString IntOrString
 intOrString = I <$> D.int <!> S <$> D.string
 
 data V3 a =
   V3 a a a
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
-v3 :: Semigroup e => D.Decode e s a -> D.Decode e s (V3 a)
+v3 :: Decode s a -> Decode s (V3 a)
 v3 f = sequenceA (V3 f f f)
 
-v3ios :: D.Decode ByteString ByteString (V3 IntOrString)
+v3ios :: Decode ByteString (V3 IntOrString)
 v3ios = v3 intOrString
 
 csv1 :: LBS.ByteString
@@ -74,14 +73,14 @@ varyingLength = LBS.intercalate "\r\n" [
   , "one,two,three,four,five"
   ]
 
-str2 :: D.Decode' ByteString (ByteString, ByteString)
+str2 :: Decode ByteString (ByteString, ByteString)
 str2 = liftA2 (,) D.contents D.contents
 
 varyingLengthTest :: TestTree
 varyingLengthTest =
   testCase "varyingLength has all the right errors" $
     D.parseDecode str2 opts varyingLength @?=
-      D.Failure (D.DecodeErrors (D.UnexpectedEndOfRow :| [
+      D.Failure (DecodeErrors (D.UnexpectedEndOfRow :| [
         D.ExpectedEndOfRow (V.fromList ["three"])
       , D.ExpectedEndOfRow (V.fromList ["three", "four"])
       , D.ExpectedEndOfRow (V.fromList ["three", "four", "five"])

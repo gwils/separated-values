@@ -52,7 +52,7 @@ utf8lb = LBS.fromStrict . UTF8.fromString
 
 -- Round-trips an encode/decode pair. This version checks whether the pair
 -- form an isomorphism
-roundTripCodecIso :: (Eq a, Show a) => TestName -> Decode' ByteString a -> Encode a -> [(LBS.ByteString, a)] -> TestTree
+roundTripCodecIso :: (Eq a, Show a) => TestName -> Decode ByteString a -> Encode a -> [(LBS.ByteString, a)] -> TestTree
 roundTripCodecIso name dec enc bsas = testGroup name . flip foldMap bsas $ \(bs,a) ->
   [ testCase (lbUtf8 bs <> ": encode . decode") $
       Success bs @?= (encode enc encOpts <$> parseDecode dec parOpts bs)
@@ -63,7 +63,7 @@ roundTripCodecIso name dec enc bsas = testGroup name . flip foldMap bsas $ \(bs,
 -- Round-trips an encode/decode pair. This version checks whether the pair
 -- form a split-idempotent. That is to say, one direction is identity, the other is
 -- idempotent.
-roundTripCodecSplitIdempotent :: (Eq a, Show a) => TestName -> Decode' ByteString a -> Encode a -> [(LBS.ByteString, a)] -> TestTree
+roundTripCodecSplitIdempotent :: (Eq a, Show a) => TestName -> Decode ByteString a -> Encode a -> [(LBS.ByteString, a)] -> TestTree
 roundTripCodecSplitIdempotent name dec enc bsas =
     let deco = parseDecode dec parOpts
         enco = encode enc encOpts

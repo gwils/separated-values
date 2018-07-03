@@ -30,13 +30,13 @@ import Data.ByteString (ByteString)
 import Data.ByteString.UTF8 as UTF8
 import qualified Data.Csv as Cassava
 import qualified Data.Csv.Parser as Cassava
-import Data.Sv.Decode (Decode', DecodeValidation, Headedness (..))
+import Data.Sv.Decode (Decode, DecodeValidation, Headedness (..))
 import qualified Data.Sv.Decode as D
 import Data.Validation (bindValidation)
 import qualified Data.Vector as V
 
 -- | Use an sv 'Decode' to decode from cassava's 'Cassava.Csv' type.
-decodeFromCassava :: Decode' ByteString a -> Cassava.Csv -> DecodeValidation ByteString [a]
+decodeFromCassava :: Decode ByteString a -> Cassava.Csv -> DecodeValidation ByteString [a]
 decodeFromCassava d =
   traverse (D.promoteStrict d) . V.toList
 
@@ -53,7 +53,7 @@ parseCassava opts =
 --
 -- This has the benefit of letting you use cassava's parser, which is very fast,
 -- with sv's decoding.
-parseDecodeFromCassava :: Decode' ByteString a -> Headedness -> Cassava.DecodeOptions -> ByteString -> DecodeValidation ByteString [a]
+parseDecodeFromCassava :: Decode ByteString a -> Headedness -> Cassava.DecodeOptions -> ByteString -> DecodeValidation ByteString [a]
 parseDecodeFromCassava d h opts bs =
   (chompFirst h <$> parseCassava opts bs) `bindValidation` decodeFromCassava d
     where

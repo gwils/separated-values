@@ -4,7 +4,7 @@ module Data.Sv.CassavaTest (test_CassavaAgreement) where
 
 import qualified Data.ByteString as BS
 import qualified Data.Csv as Csv
-import Data.Sv (Decode', Validation (Failure, Success), Headedness (Unheaded), defaultParseOptions)
+import Data.Sv (Decode, Validation (Failure, Success), Headedness (Unheaded), defaultParseOptions)
 import qualified Data.Sv.Decode as Sv
 import Data.Vector as V
 import Data.Tuple.Only (Only (Only, fromOnly))
@@ -30,7 +30,7 @@ opts :: Sv.ParseOptions
 opts = defaultParseOptions { Sv._headedness = Unheaded }
 
 -- | Test that decoding with sv gets the same result as decoding with cassava
-cassavaAgreement :: forall a . (Csv.FromField a, Csv.ToField a, Show a, Eq a) => TestName -> Decode' BS.ByteString a -> Gen a -> TestTree
+cassavaAgreement :: forall a . (Csv.FromField a, Csv.ToField a, Show a, Eq a) => TestName -> Decode BS.ByteString a -> Gen a -> TestTree
 cassavaAgreement name dec gen = testProperty name $ property $ do
   a <- forAll gen
   let oa = Only a
